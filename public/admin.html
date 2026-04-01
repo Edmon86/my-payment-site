@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Админ панель</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+
+  <style>
+    body {
+      background: #f4f6f9;
+      padding: 30px;
+    }
+
+    .card {
+      border-radius: 15px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+    }
+
+    h1 {
+      margin-bottom: 20px;
+    }
+
+    .badge {
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+
+  <h1>📊 Заказы</h1>
+
+  <div class="card p-3">
+    <table class="table table-hover">
+      <thead>
+        <tr>
+          <th>№</th>
+          <th>Email</th>
+          <th>Сумма</th>
+          <th>Услуги</th>
+          <th>Дата</th>
+        </tr>
+      </thead>
+      <tbody id="ordersTable"></tbody>
+    </table>
+  </div>
+
+</div>
+
+<script>
+async function loadOrders() {
+  const res = await fetch("/admin");
+  const orders = await res.json();
+
+  const table = document.getElementById("ordersTable");
+  table.innerHTML = "";
+
+  orders.reverse().forEach((order, index) => {
+
+    const services = order.services
+      .map(s => `${s.name} (${s.price}₽)`)
+      .join("<br>");
+
+    const row = `
+      <tr>
+        <td>${index + 1}</td>
+        <td>${order.email}</td>
+        <td><b>${order.amount} ₽</b></td>
+        <td>${services}</td>
+        <td>${new Date(order.created).toLocaleString()}</td>
+      </tr>
+    `;
+
+    table.innerHTML += row;
+  });
+}
+
+// автообновление каждые 5 сек
+setInterval(loadOrders, 5000);
+loadOrders();
+</script>
+
+</body>
+</html>
