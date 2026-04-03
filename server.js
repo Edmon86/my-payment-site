@@ -203,8 +203,8 @@ app.post('/create-checkout-session', async(req, res) => {
       metadata: {
         services: JSON.stringify(servicesForSave),
       },
-      success_url: 'http://localhost:3000/success.html',
-      cancel_url: 'http://localhost:3000/cancel.html',
+      success_url: 'https://my-payment-site-1.onrender.com/success.html',
+      cancel_url: 'https://my-payment-site-1.onrender.com/cancel.html',
     })
 
     console.log('💳 Session создан:', session.id)
