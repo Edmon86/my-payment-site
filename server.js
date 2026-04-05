@@ -6,7 +6,7 @@ const path = require('path')
 const nodemailer = require('nodemailer')
 
 const app = express()
-const PORT = 3000
+const PORT = process.env.PORT || 3000
 
 /* ========================
    БАЗА УСЛУГ
@@ -53,8 +53,13 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
 
     console.log('📦 Заказ:', order)
 
-    // 📁 Сохранение
-    const ordersFile = path.join(__dirname, 'data', 'orders.json')
+    // 📁 Сохранение с проверкой папки
+    const ordersDir = path.join(__dirname, 'data')
+    const ordersFile = path.join(ordersDir, 'orders.json')
+
+    if (!fs.existsSync(ordersDir)) {
+      fs.mkdirSync(ordersDir)
+    }
 
     let orders = []
     if (fs.existsSync(ordersFile)) {
@@ -70,7 +75,6 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
     /* ========================
        EMAIL (КРАСИВЫЙ ШАБЛОН)
     ======================== */
-
     if (order.email) {
       console.log('🚀 Начинаем отправку email...')
 
@@ -90,15 +94,12 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
         subject: 'Ваш заказ успешно оплачен ✅',
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; border: 1px solid #ddd; border-radius: 10px; overflow: hidden;">
-            
             <div style="background: linear-gradient(135deg, #1f1c2c, #928dab); color: white; padding: 20px; text-align: center;">
               <h1 style="margin: 0;">Спасибо за заказ!</h1>
             </div>
-
             <div style="padding: 20px;">
               <p>Здравствуйте 👋</p>
               <p>Ваш заказ <b>№${order.id}</b> успешно оплачен.</p>
-
               <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
                 <thead>
                   <tr style="background-color: #f2f2f2;">
@@ -121,30 +122,25 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
                   </tr>
                 </tfoot>
               </table>
-
               <div style="text-align: center; margin: 25px 0;">
-                <a href="http://localhost:3000" style="background: #ff6a00; color: white; padding: 12px 25px; text-decoration: none; border-radius: 6px;">
+                <a href="https://my-payment-site-1.onrender.com" style="background: #ff6a00; color: white; padding: 12px 25px; text-decoration: none; border-radius: 6px;">
                   Перейти на сайт
                 </a>
               </div>
-
               <p style="font-size: 14px; color: #666;">
                 Мы уже начали работу над вашим заказом 🚀
               </p>
             </div>
-
             <div style="background: #f2f2f2; padding: 15px; text-align: center; font-size: 12px;">
               Это письмо отправлено автоматически.<br>
               © 2026 Ваш сервис
             </div>
-
           </div>
         `,
       }
 
       transporter.sendMail(message, (err, info) => {
         console.log('📡 Ответ от сервера почты...')
-
         if (err) {
           console.error('❌ Ошибка отправки email:', err)
         } else {
@@ -152,7 +148,6 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
           console.log('📧 Ответ:', info.response)
         }
       })
-
     } else {
       console.log('⚠️ Email отсутствует')
     }
@@ -168,7 +163,7 @@ app.use(express.static('public'))
 app.use(express.json())
 
 /* ========================
-   CREATE CHECKOUT
+   CREATE CHECKOUT SESSION
 ======================== */
 app.post('/create-checkout-session', async(req, res) => {
   const { services, email } = req.body
@@ -208,19 +203,18 @@ app.post('/create-checkout-session', async(req, res) => {
     })
 
     console.log('💳 Session создан:', session.id)
-
     res.json({ id: session.id })
-
   } catch (err) {
     console.error('❌ Stripe ошибка:', err.message)
     res.status(500).json({ error: err.message })
   }
 })
 
+/* ========================
+   BASIC AUTH ADMIN
+======================== */
 function basicAuth(req, res, next) {
-
   const authHeader = req.headers.authorization
-
   if (!authHeader) {
     res.setHeader('WWW-Authenticate', 'Basic realm="Admin Panel"')
     return res.status(401).send('Authorization required')
@@ -228,13 +222,9 @@ function basicAuth(req, res, next) {
 
   const base64 = authHeader.split(' ')[1]
   const decoded = Buffer.from(base64, 'base64').toString('utf-8')
-
   const [login, password] = decoded.split(':')
 
-  if (
-    login === process.env.ADMIN_LOGIN &&
-    password === process.env.ADMIN_PASSWORD
-  ) {
+  if (login === process.env.ADMIN_LOGIN && password === process.env.ADMIN_PASSWORD) {
     return next()
   }
 
@@ -244,21 +234,16 @@ function basicAuth(req, res, next) {
 
 app.get('/admin', basicAuth, (req, res) => {
   const ordersFile = path.join(__dirname, 'data', 'orders.json')
-
-  if (!fs.existsSync(ordersFile)) {
-    return res.json([])
-  }
+  if (!fs.existsSync(ordersFile)) return res.json([])
 
   const orders = JSON.parse(fs.readFileSync(ordersFile))
-
   console.log('📊 Отдаём заказы:', orders)
-
   res.json(orders)
 })
 
 /* ========================
-   SERVER
+   SERVER START
 ======================== */
 app.listen(PORT, () => {
-  console.log(`🚀 http://localhost:${PORT}`)
+  console.log(`🚀 Server running on port ${PORT}`)
 })
