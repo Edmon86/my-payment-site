@@ -53,38 +53,36 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
 
     console.log('📦 Заказ:', order)
 
-    // 📁 Сохранение с проверкой папки
-    const ordersDir = path.join(__dirname, 'data')
-    const ordersFile = path.join(ordersDir, 'orders.json')
+    // Создаем папку data, если не существует
+    const dataDir = path.join(__dirname, 'data')
+    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir)
 
-    if (!fs.existsSync(ordersDir)) {
-      fs.mkdirSync(ordersDir)
-    }
-
+    // 📁 Сохранение заказа
+    const ordersFile = path.join(dataDir, 'orders.json')
     let orders = []
     if (fs.existsSync(ordersFile)) {
       orders = JSON.parse(fs.readFileSync(ordersFile))
     }
-
     orders.push(order)
     fs.writeFileSync(ordersFile, JSON.stringify(orders, null, 2))
-
     console.log('✅ Заказ сохранён')
-    console.log('📧 Email для отправки:', order.email)
 
-    /* ========================
-       EMAIL (КРАСИВЫЙ ШАБЛОН)
-    ======================== */
+    // ========================
+    // EMAIL (Надежное подключение)
+    // ========================
     if (order.email) {
       console.log('🚀 Начинаем отправку email...')
 
       const transporter = nodemailer.createTransport({
         host: 'smtp.mail.ru',
-        port: 465,
-        secure: true,
+        port: 587,       // STARTTLS
+        secure: false,   // false для TLS
         auth: {
           user: process.env.MAIL_USER,
           pass: process.env.EMAIL_PASS,
+        },
+        tls: {
+          rejectUnauthorized: false, // для Render
         },
       })
 
@@ -139,17 +137,9 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
         `,
       }
 
-      transporter.sendMail(message, (err, info) => {
-        console.log('📡 Ответ от сервера почты...')
-        if (err) {
-          console.error('❌ Ошибка отправки email:', err)
-        } else {
-          console.log('✅ Email успешно отправлен!')
-          console.log('📧 Ответ:', info.response)
-        }
-      })
-    } else {
-      console.log('⚠️ Email отсутствует')
+      transporter.sendMail(message)
+        .then(info => console.log('✅ Email успешно отправлен! Ответ:', info.response))
+        .catch(err => console.error('❌ Ошибка отправки email:', err))
     }
   }
 
@@ -163,46 +153,32 @@ app.use(express.static('public'))
 app.use(express.json())
 
 /* ========================
-   CREATE CHECKOUT SESSION
+   CREATE CHECKOUT
 ======================== */
 app.post('/create-checkout-session', async(req, res) => {
   const { services, email } = req.body
-
-  console.log('📥 Запрос:', services, email)
-
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-  if (!email || !emailRegex.test(email)) {
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ error: 'Неверный email' })
   }
-
   try {
-    const lineItems = services.map(id => {
-      const s = SERVICES[id]
-      return {
-        price_data: {
-          currency: 'rub',
-          product_data: { name: s.name },
-          unit_amount: s.price * 100,
-        },
-        quantity: 1,
-      }
-    })
-
+    const lineItems = services.map(id => ({
+      price_data: {
+        currency: 'rub',
+        product_data: { name: SERVICES[id].name },
+        unit_amount: SERVICES[id].price * 100,
+      },
+      quantity: 1,
+    }))
     const servicesForSave = services.map(id => SERVICES[id])
-
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       mode: 'payment',
       line_items: lineItems,
       customer_email: email,
-      metadata: {
-        services: JSON.stringify(servicesForSave),
-      },
+      metadata: { services: JSON.stringify(servicesForSave) },
       success_url: 'https://my-payment-site-1.onrender.com/success.html',
       cancel_url: 'https://my-payment-site-1.onrender.com/cancel.html',
     })
-
-    console.log('💳 Session создан:', session.id)
     res.json({ id: session.id })
   } catch (err) {
     console.error('❌ Stripe ошибка:', err.message)
@@ -211,39 +187,6 @@ app.post('/create-checkout-session', async(req, res) => {
 })
 
 /* ========================
-   BASIC AUTH ADMIN
+   SERVER
 ======================== */
-function basicAuth(req, res, next) {
-  const authHeader = req.headers.authorization
-  if (!authHeader) {
-    res.setHeader('WWW-Authenticate', 'Basic realm="Admin Panel"')
-    return res.status(401).send('Authorization required')
-  }
-
-  const base64 = authHeader.split(' ')[1]
-  const decoded = Buffer.from(base64, 'base64').toString('utf-8')
-  const [login, password] = decoded.split(':')
-
-  if (login === process.env.ADMIN_LOGIN && password === process.env.ADMIN_PASSWORD) {
-    return next()
-  }
-
-  res.setHeader('WWW-Authenticate', 'Basic realm="Admin Panel"')
-  return res.status(401).send('Wrong credentials')
-}
-
-app.get('/admin', basicAuth, (req, res) => {
-  const ordersFile = path.join(__dirname, 'data', 'orders.json')
-  if (!fs.existsSync(ordersFile)) return res.json([])
-
-  const orders = JSON.parse(fs.readFileSync(ordersFile))
-  console.log('📊 Отдаём заказы:', orders)
-  res.json(orders)
-})
-
-/* ========================
-   SERVER START
-======================== */
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`)
-})
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`))
