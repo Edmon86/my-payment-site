@@ -18,7 +18,53 @@ const SERVICES = {
 }
 
 /* ========================
-   WEBHOOK
+   MIDDLEWARE
+======================== */
+app.use(express.static('public'))
+app.use(express.json())
+
+/* ========================
+   BASIC AUTH (ADMIN)
+======================== */
+function basicAuth(req, res, next) {
+  const authHeader = req.headers.authorization
+
+  if (!authHeader) {
+    res.setHeader('WWW-Authenticate', 'Basic realm="Admin Panel"')
+    return res.status(401).send('Authorization required')
+  }
+
+  const base64 = authHeader.split(' ')[1]
+  const decoded = Buffer.from(base64, 'base64').toString('utf-8')
+  const [login, password] = decoded.split(':')
+
+  if (
+    login === process.env.ADMIN_LOGIN &&
+    password === process.env.ADMIN_PASSWORD
+  ) {
+    return next()
+  }
+
+  res.setHeader('WWW-Authenticate', 'Basic realm="Admin Panel"')
+  return res.status(401).send('Wrong credentials')
+}
+
+/* ========================
+   ADMIN ROUTE
+======================== */
+app.get('/admin', basicAuth, (req, res) => {
+  const ordersFile = path.join(__dirname, 'data', 'orders.json')
+
+  if (!fs.existsSync(ordersFile)) {
+    return res.json([])
+  }
+
+  const orders = JSON.parse(fs.readFileSync(ordersFile))
+  res.json(orders)
+})
+
+/* ========================
+   WEBHOOK STRIPE
 ======================== */
 app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
   const sig = req.headers['stripe-signature']
@@ -90,37 +136,20 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
         to: order.email,
         subject: 'Ваш заказ успешно оплачен ✅',
         html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; border:1px solid #ddd; border-radius:10px; overflow:hidden;">
-            
-            <div style="background:#1f1c2c;color:#fff;padding:20px;text-align:center;">
-              <h2 style="margin:0;">Спасибо за заказ!</h2>
-            </div>
+          <div style="font-family: Arial; max-width: 600px; margin: auto; border:1px solid #ddd; padding:20px; border-radius:10px;">
+            <h2>Спасибо за заказ!</h2>
+            <p>Заказ <b>${order.id}</b> оплачен.</p>
 
-            <div style="padding:20px;">
-              <p>Здравствуйте 👋</p>
-              <p>Ваш заказ <b>№${order.id}</b> успешно оплачен.</p>
+            <ul>
+              ${services.map(s => `<li>${s.name} — ${s.price} ₽</li>`).join('')}
+            </ul>
 
-              <ul>
-                ${services.map(s => `<li>${s.name} — ${s.price} ₽</li>`).join('')}
-              </ul>
+            <p><b>Итого: ${order.amount} ₽</b></p>
 
-              <p><b>Итого: ${order.amount} ₽</b></p>
-
-              <div style="text-align:center;margin:20px 0;">
-                <a href="https://my-payment-site-1.onrender.com"
-                   style="background:#ff6a00;color:#fff;padding:12px 20px;text-decoration:none;border-radius:5px;">
-                  Перейти на сайт
-                </a>
-              </div>
-
-              <p style="font-size:13px;color:#777;">
-                Мы уже начали работу над вашим заказом 🚀
-              </p>
-            </div>
-
-            <div style="background:#f2f2f2;padding:10px;text-align:center;font-size:12px;">
-              © 2026 Ваш сервис
-            </div>
+            <a href="https://my-payment-site-1.onrender.com"
+               style="background:#ff6a00;color:#fff;padding:10px 20px;text-decoration:none;border-radius:5px;">
+              Перейти на сайт
+            </a>
           </div>
         `,
       }
@@ -135,18 +164,10 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
 })
 
 /* ========================
-   MIDDLEWARE
-======================== */
-app.use(express.static('public'))
-app.use(express.json())
-
-/* ========================
-   CREATE CHECKOUT SESSION
+   CHECKOUT SESSION
 ======================== */
 app.post('/create-checkout-session', async(req, res) => {
   const { services, email } = req.body
-
-  console.log('📥 Запрос:', services, email)
 
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ error: 'Неверный email' })
@@ -175,8 +196,6 @@ app.post('/create-checkout-session', async(req, res) => {
       success_url: 'https://my-payment-site-1.onrender.com/success.html',
       cancel_url: 'https://my-payment-site-1.onrender.com/cancel.html',
     })
-
-    console.log('💳 Session создан:', session.id)
 
     res.json({ id: session.id })
   } catch (err) {
