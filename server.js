@@ -3,9 +3,7 @@ const express = require('express')
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY)
 const fs = require('fs')
 const path = require('path')
-const { Resend } = require('resend')
-
-const resend = new Resend(process.env.RESEND_API_KEY)
+const nodemailer = require('nodemailer')
 
 const app = express()
 const PORT = process.env.PORT || 3000
@@ -63,6 +61,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
 
     const ordersFile = path.join(dataDir, 'orders.json')
     let orders = []
+
     if (fs.existsSync(ordersFile)) {
       orders = JSON.parse(fs.readFileSync(ordersFile))
     }
@@ -73,35 +72,62 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
     console.log('✅ Заказ сохранён')
 
     /* ========================
-       EMAIL (RESEND)
+       EMAIL (GMAIL SMTP)
     ======================== */
     if (order.email) {
-      console.log('🚀 Отправка email через Resend...')
+      console.log('🚀 Отправка email через Gmail...')
 
-      resend.emails.send({
-        from: process.env.MAIL_FROM,
+      const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: process.env.MAIL_USER,
+          pass: process.env.EMAIL_PASS,
+        },
+      })
+
+      const message = {
+        from: process.env.MAIL_USER,
         to: order.email,
         subject: 'Ваш заказ успешно оплачен ✅',
         html: `
-          <div style="font-family: Arial; max-width: 600px; margin: auto;">
-            <h2>Спасибо за заказ!</h2>
-            <p>Заказ № <b>${order.id}</b> успешно оплачен.</p>
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; border:1px solid #ddd; border-radius:10px; overflow:hidden;">
+            
+            <div style="background:#1f1c2c;color:#fff;padding:20px;text-align:center;">
+              <h2 style="margin:0;">Спасибо за заказ!</h2>
+            </div>
 
-            <ul>
-              ${services.map(s => `<li>${s.name} — ${s.price} ₽</li>`).join('')}
-            </ul>
+            <div style="padding:20px;">
+              <p>Здравствуйте 👋</p>
+              <p>Ваш заказ <b>№${order.id}</b> успешно оплачен.</p>
 
-            <p><b>Итого: ${order.amount} ₽</b></p>
+              <ul>
+                ${services.map(s => `<li>${s.name} — ${s.price} ₽</li>`).join('')}
+              </ul>
 
-            <a href="https://my-payment-site-1.onrender.com"
-               style="background:#ff6a00;color:#fff;padding:10px 20px;text-decoration:none;border-radius:5px;">
-              Перейти на сайт
-            </a>
+              <p><b>Итого: ${order.amount} ₽</b></p>
+
+              <div style="text-align:center;margin:20px 0;">
+                <a href="https://my-payment-site-1.onrender.com"
+                   style="background:#ff6a00;color:#fff;padding:12px 20px;text-decoration:none;border-radius:5px;">
+                  Перейти на сайт
+                </a>
+              </div>
+
+              <p style="font-size:13px;color:#777;">
+                Мы уже начали работу над вашим заказом 🚀
+              </p>
+            </div>
+
+            <div style="background:#f2f2f2;padding:10px;text-align:center;font-size:12px;">
+              © 2026 Ваш сервис
+            </div>
           </div>
         `,
-      })
-        .then(() => console.log('✅ Email отправлен через Resend'))
-        .catch(err => console.error('❌ Ошибка Resend:', err))
+      }
+
+      transporter.sendMail(message)
+        .then(() => console.log('✅ Email отправлен через Gmail'))
+        .catch(err => console.error('❌ Ошибка Gmail:', err))
     }
   }
 
