@@ -18,12 +18,6 @@ const SERVICES = {
 }
 
 /* ========================
-   MIDDLEWARE
-======================== */
-app.use(express.static('public'))
-app.use(express.json())
-
-/* ========================
    BASIC AUTH (ADMIN)
 ======================== */
 function basicAuth(req, res, next) {
@@ -50,7 +44,7 @@ function basicAuth(req, res, next) {
 }
 
 /* ========================
-   ADMIN ROUTE
+   ADMIN
 ======================== */
 app.get('/admin', basicAuth, (req, res) => {
   const ordersFile = path.join(__dirname, 'data', 'orders.json')
@@ -64,10 +58,11 @@ app.get('/admin', basicAuth, (req, res) => {
 })
 
 /* ========================
-   WEBHOOK STRIPE
+   WEBHOOK (ВАЖНО ДО express.json)
 ======================== */
 app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
   const sig = req.headers['stripe-signature']
+
   let event
 
   try {
@@ -99,15 +94,13 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
 
     console.log('📦 Заказ:', order)
 
-    /* ========================
-       СОХРАНЕНИЕ
-    ======================== */
+    // 📁 Сохранение
     const dataDir = path.join(__dirname, 'data')
     if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir)
 
     const ordersFile = path.join(dataDir, 'orders.json')
-    let orders = []
 
+    let orders = []
     if (fs.existsSync(ordersFile)) {
       orders = JSON.parse(fs.readFileSync(ordersFile))
     }
@@ -117,9 +110,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
 
     console.log('✅ Заказ сохранён')
 
-    /* ========================
-       EMAIL (GMAIL SMTP)
-    ======================== */
+    // 📧 EMAIL
     if (order.email) {
       console.log('🚀 Отправка email через Gmail...')
 
@@ -136,26 +127,17 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
         to: order.email,
         subject: 'Ваш заказ успешно оплачен ✅',
         html: `
-          <div style="font-family: Arial; max-width: 600px; margin: auto; border:1px solid #ddd; padding:20px; border-radius:10px;">
-            <h2>Спасибо за заказ!</h2>
-            <p>Заказ <b>${order.id}</b> оплачен.</p>
-
-            <ul>
-              ${services.map(s => `<li>${s.name} — ${s.price} ₽</li>`).join('')}
-            </ul>
-
-            <p><b>Итого: ${order.amount} ₽</b></p>
-
-            <a href="https://my-payment-site-1.onrender.com"
-               style="background:#ff6a00;color:#fff;padding:10px 20px;text-decoration:none;border-radius:5px;">
-              Перейти на сайт
-            </a>
-          </div>
+          <h2>Спасибо за заказ!</h2>
+          <p>Заказ № <b>${order.id}</b> оплачен</p>
+          <ul>
+            ${services.map(s => `<li>${s.name} — ${s.price} ₽</li>`).join('')}
+          </ul>
+          <p><b>Итого: ${order.amount} ₽</b></p>
         `,
       }
 
       transporter.sendMail(message)
-        .then(() => console.log('✅ Email отправлен через Gmail'))
+        .then(() => console.log('✅ Email отправлен'))
         .catch(err => console.error('❌ Ошибка Gmail:', err))
     }
   }
@@ -164,7 +146,13 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
 })
 
 /* ========================
-   CHECKOUT SESSION
+   ПОСЛЕ webhook!
+======================== */
+app.use(express.static('public'))
+app.use(express.json())
+
+/* ========================
+   CHECKOUT
 ======================== */
 app.post('/create-checkout-session', async(req, res) => {
   const { services, email } = req.body
@@ -183,15 +171,13 @@ app.post('/create-checkout-session', async(req, res) => {
       quantity: 1,
     }))
 
-    const servicesForSave = services.map(id => SERVICES[id])
-
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       mode: 'payment',
       line_items: lineItems,
       customer_email: email,
       metadata: {
-        services: JSON.stringify(servicesForSave),
+        services: JSON.stringify(services.map(id => SERVICES[id])),
       },
       success_url: 'https://my-payment-site-1.onrender.com/success.html',
       cancel_url: 'https://my-payment-site-1.onrender.com/cancel.html',
