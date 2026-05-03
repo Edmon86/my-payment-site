@@ -3,6 +3,7 @@ const express = require('express')
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY)
 const fs = require('fs')
 const path = require('path')
+const nodemailer = require('nodemailer')
 
 const app = express()
 const PORT = process.env.PORT || 3000
@@ -18,6 +19,30 @@ const SERVICES = {
   site: { name: 'Разработка сайта', price: 1500 },
   ads: { name: 'Настройка рекламы', price: 800 },
   logo: { name: 'Дизайн логотипа', price: 500 },
+}
+
+async function sendOrderEmail(order, services) {
+  const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.MAIL_USER,
+      pass: process.env.EMAIL_PASS,
+    },
+  })
+
+  await transporter.sendMail({
+    from: process.env.MAIL_USER,
+    to: order.email,
+    subject: 'Ваш заказ успешно оплачен ✅',
+    html: `
+      <h2>Спасибо за заказ!</h2>
+      <p>Заказ № <b>${order.id}</b> оплачен</p>
+      <ul>
+        ${services.map(s => `<li>${s.name} — ${s.price} ₽</li>`).join('')}
+      </ul>
+      <p><b>Итого: ${order.amount} ₽</b></p>
+    `,
+  })
 }
 
 /* ========================
@@ -113,7 +138,13 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
 
     console.log('✅ Заказ сохранён')
 
-    console.log('📧 Чек покупателю отправляет Stripe')
+    if (order.email) {
+      console.log('🚀 Отправка email через Gmail...')
+
+      sendOrderEmail(order, services)
+        .then(() => console.log('✅ Email отправлен'))
+        .catch(err => console.error('❌ Ошибка Gmail:', err))
+    }
   }
 
   res.json({ received: true })
