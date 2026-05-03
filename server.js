@@ -5,6 +5,7 @@ const fs = require('fs')
 const path = require('path')
 const nodemailer = require('nodemailer')
 const dns = require('dns')
+const sgMail = require('@sendgrid/mail')
 
 const app = express()
 const PORT = process.env.PORT || 3000
@@ -26,7 +27,7 @@ async function sendOrderEmail(order, services) {
   const [gmailSmtpIp] = await dns.promises.resolve4('smtp.gmail.com')
 
   const message = {
-    from: process.env.MAIL_USER,
+    from: process.env.EMAIL_FROM || process.env.MAIL_USER,
     to: order.email,
     subject: 'Ваш заказ успешно оплачен ✅',
     html: `
@@ -37,6 +38,12 @@ async function sendOrderEmail(order, services) {
       </ul>
       <p><b>Итого: ${order.amount} ₽</b></p>
     `,
+  }
+
+  if (process.env.SENDGRID_API_KEY) {
+    sgMail.setApiKey(process.env.SENDGRID_API_KEY)
+    await sgMail.send(message)
+    return
   }
 
   const baseTransportOptions = {
