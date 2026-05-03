@@ -3,7 +3,6 @@ const express = require('express')
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY)
 const fs = require('fs')
 const path = require('path')
-const nodemailer = require('nodemailer')
 
 const app = express()
 const PORT = process.env.PORT || 3000
@@ -19,37 +18,6 @@ const SERVICES = {
   site: { name: 'Разработка сайта', price: 1500 },
   ads: { name: 'Настройка рекламы', price: 800 },
   logo: { name: 'Дизайн логотипа', price: 500 },
-}
-
-async function sendOrderEmail(order, services) {
-  const message = {
-    from: process.env.EMAIL_FROM || process.env.MAIL_USER,
-    to: order.email,
-    subject: 'Ваш заказ успешно оплачен ✅',
-    html: `
-      <h2>Спасибо за заказ!</h2>
-      <p>Заказ № <b>${order.id}</b> оплачен</p>
-      <ul>
-        ${services.map(s => `<li>${s.name} — ${s.price} ₽</li>`).join('')}
-      </ul>
-      <p><b>Итого: ${order.amount} ₽</b></p>
-    `,
-  }
-
-  const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 465,
-    secure: true,
-    connectionTimeout: 30000,
-    greetingTimeout: 30000,
-    socketTimeout: 30000,
-    auth: {
-      user: process.env.MAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-  })
-
-  await transporter.sendMail(message)
 }
 
 /* ========================
@@ -145,14 +113,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
 
     console.log('✅ Заказ сохранён')
 
-    // 📧 EMAIL
-    if (order.email) {
-      console.log('🚀 Отправка email...')
-
-      sendOrderEmail(order, services)
-        .then(() => console.log('✅ Email отправлен'))
-        .catch(err => console.error('❌ Ошибка email:', err))
-    }
+    console.log('📧 Чек покупателю отправляет Stripe')
   }
 
   res.json({ received: true })
@@ -207,6 +168,9 @@ app.post('/create-checkout-session', async(req, res) => {
       mode: 'payment',
       line_items: lineItems,
       customer_email: email,
+      payment_intent_data: {
+        receipt_email: email,
+      },
       metadata: {
         services: JSON.stringify(selectedServices),
       },
