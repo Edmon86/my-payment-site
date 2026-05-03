@@ -4,7 +4,6 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY)
 const fs = require('fs')
 const path = require('path')
 const nodemailer = require('nodemailer')
-const { Resend } = require('resend')
 
 const app = express()
 const PORT = process.env.PORT || 3000
@@ -37,14 +36,13 @@ async function sendOrderEmail(order, services) {
     `,
   }
 
-  if (process.env.RESEND_API_KEY) {
-    const resend = new Resend(process.env.RESEND_API_KEY)
-    await resend.emails.send(message)
-    return
-  }
-
   const transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
+    connectionTimeout: 30000,
+    greetingTimeout: 30000,
+    socketTimeout: 30000,
     auth: {
       user: process.env.MAIL_USER,
       pass: process.env.EMAIL_PASS,
