@@ -25,23 +25,7 @@ const SERVICES = {
 async function sendOrderEmail(order, services) {
   const [gmailSmtpIp] = await dns.promises.resolve4('smtp.gmail.com')
 
-  const transporter = nodemailer.createTransport({
-    host: gmailSmtpIp,
-    port: 465,
-    secure: true,
-    connectionTimeout: 30000,
-    greetingTimeout: 30000,
-    socketTimeout: 30000,
-    auth: {
-      user: process.env.MAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-    tls: {
-      servername: 'smtp.gmail.com',
-    },
-  })
-
-  await transporter.sendMail({
+  const message = {
     from: process.env.MAIL_USER,
     to: order.email,
     subject: 'Ваш заказ успешно оплачен ✅',
@@ -53,7 +37,45 @@ async function sendOrderEmail(order, services) {
       </ul>
       <p><b>Итого: ${order.amount} ₽</b></p>
     `,
-  })
+  }
+
+  const baseTransportOptions = {
+    host: gmailSmtpIp,
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 15000,
+    auth: {
+      user: process.env.MAIL_USER,
+      pass: process.env.EMAIL_PASS,
+    },
+    tls: {
+      servername: 'smtp.gmail.com',
+    },
+  }
+
+  const smtpOptions = [
+    { name: '465 SSL', port: 465, secure: true },
+    { name: '587 STARTTLS', port: 587, secure: false, requireTLS: true },
+  ]
+
+  let lastError
+
+  for (const options of smtpOptions) {
+    try {
+      const transporter = nodemailer.createTransport({
+        ...baseTransportOptions,
+        ...options,
+      })
+
+      await transporter.sendMail(message)
+      return
+    } catch (err) {
+      lastError = err
+      console.error(`❌ Gmail ${options.name}:`, err.message)
+    }
+  }
+
+  throw lastError
 }
 
 /* ========================
