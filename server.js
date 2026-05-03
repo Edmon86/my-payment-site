@@ -23,14 +23,15 @@ const SERVICES = {
 }
 
 async function sendOrderEmail(order, services) {
+  const [gmailSmtpIp] = await dns.promises.resolve4('smtp.gmail.com')
+
   const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
+    host: gmailSmtpIp,
     port: 465,
     secure: true,
-    family: 4,
-    lookup: (hostname, options, callback) => {
-      dns.lookup(hostname, { ...options, family: 4 }, callback)
-    },
+    connectionTimeout: 30000,
+    greetingTimeout: 30000,
+    socketTimeout: 30000,
     auth: {
       user: process.env.MAIL_USER,
       pass: process.env.EMAIL_PASS,
