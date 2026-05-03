@@ -4,15 +4,9 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY)
 const fs = require('fs')
 const path = require('path')
 const nodemailer = require('nodemailer')
-const dns = require('dns')
-const sgMail = require('@sendgrid/mail')
 
 const app = express()
 const PORT = process.env.PORT || 3000
-const STRIPE_PUBLISHABLE_KEY = process.env.STRIPE_PUBLISHABLE_KEY ||
-  'pk_test_51T0TSbENSTE40GlTsyq0zYQg0ifKhqJ6hY7WYGEoT8K91R6ossCD1vUeSPwpxgG40JzvP816apQW2Lnch9JzemYd00JEutRTru'
-
-app.set('trust proxy', 1)
 
 /* ========================
    БАЗА УСЛУГ
@@ -23,75 +17,13 @@ const SERVICES = {
   logo: { name: 'Дизайн логотипа', price: 500 },
 }
 
-async function sendOrderEmail(order, services) {
-  const [gmailSmtpIp] = await dns.promises.resolve4('smtp.gmail.com')
-
-  const message = {
-    from: process.env.EMAIL_FROM || process.env.MAIL_USER,
-    to: order.email,
-    subject: 'Ваш заказ успешно оплачен ✅',
-    html: `
-      <h2>Спасибо за заказ!</h2>
-      <p>Заказ № <b>${order.id}</b> оплачен</p>
-      <ul>
-        ${services.map(s => `<li>${s.name} — ${s.price} ₽</li>`).join('')}
-      </ul>
-      <p><b>Итого: ${order.amount} ₽</b></p>
-    `,
-  }
-
-  if (process.env.SENDGRID_API_KEY) {
-    sgMail.setApiKey(process.env.SENDGRID_API_KEY)
-    await sgMail.send(message)
-    return
-  }
-
-  const baseTransportOptions = {
-    host: gmailSmtpIp,
-    connectionTimeout: 15000,
-    greetingTimeout: 15000,
-    socketTimeout: 15000,
-    auth: {
-      user: process.env.MAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-    tls: {
-      servername: 'smtp.gmail.com',
-    },
-  }
-
-  const smtpOptions = [
-    { name: '465 SSL', port: 465, secure: true },
-    { name: '587 STARTTLS', port: 587, secure: false, requireTLS: true },
-  ]
-
-  let lastError
-
-  for (const options of smtpOptions) {
-    try {
-      const transporter = nodemailer.createTransport({
-        ...baseTransportOptions,
-        ...options,
-      })
-
-      await transporter.sendMail(message)
-      return
-    } catch (err) {
-      lastError = err
-      console.error(`❌ Gmail ${options.name}:`, err.message)
-    }
-  }
-
-  throw lastError
-}
-
 /* ========================
    BASIC AUTH (ADMIN)
 ======================== */
 function basicAuth(req, res, next) {
   const authHeader = req.headers.authorization
 
-  if (!authHeader || !authHeader.startsWith('Basic ')) {
+  if (!authHeader) {
     res.setHeader('WWW-Authenticate', 'Basic realm="Admin Panel"')
     return res.status(401).send('Authorization required')
   }
@@ -178,10 +110,33 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
 
     console.log('✅ Заказ сохранён')
 
+    // 📧 EMAIL
     if (order.email) {
       console.log('🚀 Отправка email через Gmail...')
 
-      sendOrderEmail(order, services)
+      const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: process.env.MAIL_USER,
+          pass: process.env.EMAIL_PASS,
+        },
+      })
+
+      const message = {
+        from: process.env.MAIL_USER,
+        to: order.email,
+        subject: 'Ваш заказ успешно оплачен ✅',
+        html: `
+          <h2>Спасибо за заказ!</h2>
+          <p>Заказ № <b>${order.id}</b> оплачен</p>
+          <ul>
+            ${services.map(s => `<li>${s.name} — ${s.price} ₽</li>`).join('')}
+          </ul>
+          <p><b>Итого: ${order.amount} ₽</b></p>
+        `,
+      }
+
+      transporter.sendMail(message)
         .then(() => console.log('✅ Email отправлен'))
         .catch(err => console.error('❌ Ошибка Gmail:', err))
     }
@@ -196,12 +151,6 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
 app.use(express.static('public'))
 app.use(express.json())
 
-app.get('/config', (req, res) => {
-  res.json({
-    stripePublishableKey: STRIPE_PUBLISHABLE_KEY,
-  })
-})
-
 /* ========================
    CHECKOUT
 ======================== */
@@ -212,41 +161,26 @@ app.post('/create-checkout-session', async(req, res) => {
     return res.status(400).json({ error: 'Неверный email' })
   }
 
-  if (!Array.isArray(services) || services.length === 0) {
-    return res.status(400).json({ error: 'Выберите хотя бы одну услугу' })
-  }
-
-  const selectedServices = services.map(id => SERVICES[id])
-
-  if (selectedServices.some(service => !service)) {
-    return res.status(400).json({ error: 'Неверная услуга' })
-  }
-
   try {
-    const lineItems = selectedServices.map(service => ({
+    const lineItems = services.map(id => ({
       price_data: {
         currency: 'rub',
-        product_data: { name: service.name },
-        unit_amount: service.price * 100,
+        product_data: { name: SERVICES[id].name },
+        unit_amount: SERVICES[id].price * 100,
       },
       quantity: 1,
     }))
-
-    const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       mode: 'payment',
       line_items: lineItems,
       customer_email: email,
-      payment_intent_data: {
-        receipt_email: email,
-      },
       metadata: {
-        services: JSON.stringify(selectedServices),
+        services: JSON.stringify(services.map(id => SERVICES[id])),
       },
-      success_url: `${baseUrl}/success.html`,
-      cancel_url: `${baseUrl}/cancel.html`,
+      success_url: 'https://my-payment-site-1.onrender.com/success.html',
+      cancel_url: 'https://my-payment-site-1.onrender.com/cancel.html',
     })
 
     res.json({ id: session.id })
@@ -259,10 +193,6 @@ app.post('/create-checkout-session', async(req, res) => {
 /* ========================
    SERVER
 ======================== */
-if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`)
-  })
-}
-
-module.exports = app
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`)
+})

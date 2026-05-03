@@ -129,15 +129,6 @@
 <script>
 let orders = [];
 
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
 async function loadOrders() {
   const res = await fetch("/admin");
   orders = await res.json();
@@ -152,13 +143,11 @@ function render() {
   let dateFilter = document.getElementById("dateFilter").value;
 
   let filtered = orders.filter(o => {
-    let email = String(o.email ?? "");
-    let created = String(o.created ?? "");
-    let okEmail = email.toLowerCase().includes(search);
+    let okEmail = o.email.toLowerCase().includes(search);
     let okDate = true;
 
     if (dateFilter) {
-      okDate = created.startsWith(dateFilter);
+      okDate = o.created.startsWith(dateFilter);
     }
 
     return okEmail && okDate;
@@ -167,23 +156,21 @@ function render() {
   let total = 0;
 
   filtered.reverse().forEach((o, i) => {
-    total += Number(o.amount) || 0;
+    total += o.amount;
 
     const status = o.status === "paid"
       ? `<span class="badge badge-paid">paid</span>`
       : `<span class="badge badge-wait">pending</span>`;
 
-    const services = Array.isArray(o.services)
-      ? o.services.map(s => `${escapeHtml(s.name)} (${escapeHtml(s.price)}₽)`).join("<br>")
-      : "";
+    const services = o.services.map(s => `${s.name} (${s.price}₽)`).join("<br>");
 
     table.innerHTML += `
       <tr>
         <td>${i + 1}</td>
-        <td>${escapeHtml(o.email || "—")}</td>
-        <td><b>${escapeHtml(o.amount || 0)} ₽</b></td>
+        <td>${o.email}</td>
+        <td><b>${o.amount} ₽</b></td>
         <td>${services}</td>
-        <td>${escapeHtml(o.created ? new Date(o.created).toLocaleString() : "—")}</td>
+        <td>${new Date(o.created).toLocaleString()}</td>
         <td>${status}</td>
       </tr>
     `;

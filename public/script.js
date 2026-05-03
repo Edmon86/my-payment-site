@@ -1,4 +1,6 @@
-document.addEventListener('DOMContentLoaded', async() => {
+const stripe = Stripe('pk_test_51T0TSbENSTE40GlTsyq0zYQg0ifKhqJ6hY7WYGEoT8K91R6ossCD1vUeSPwpxgG40JzvP816apQW2Lnch9JzemYd00JEutRTru')
+
+document.addEventListener('DOMContentLoaded', () => {
 
   const checkboxes = document.querySelectorAll('.service')
   const totalElement = document.getElementById('total')
@@ -7,23 +9,6 @@ document.addEventListener('DOMContentLoaded', async() => {
   const emailError = document.getElementById('emailError')
 
   let selectedServices = []
-  let stripe
-
-  try {
-    const res = await fetch('/config')
-    const config = await res.json()
-
-    if (!config.stripePublishableKey) {
-      throw new Error('Stripe publishable key is missing')
-    }
-
-    stripe = Stripe(config.stripePublishableKey)
-  } catch (err) {
-    console.error(err)
-    button.textContent = 'Оплата временно недоступна'
-    button.disabled = true
-    return
-  }
 
   function updateUI() {
     let total = 0
@@ -105,8 +90,8 @@ document.addEventListener('DOMContentLoaded', async() => {
 
       const session = await res.json()
 
-      if (!res.ok || !session.id) {
-        throw new Error(session.error || 'Ошибка Stripe')
+      if (!session.id) {
+        throw new Error('Ошибка Stripe')
       }
 
       await stripe.redirectToCheckout({
