@@ -4,6 +4,7 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY)
 const fs = require('fs')
 const path = require('path')
 const nodemailer = require('nodemailer')
+const dns = require('dns')
 
 const app = express()
 const PORT = process.env.PORT || 3000
@@ -27,9 +28,15 @@ async function sendOrderEmail(order, services) {
     port: 465,
     secure: true,
     family: 4,
+    lookup: (hostname, options, callback) => {
+      dns.lookup(hostname, { ...options, family: 4 }, callback)
+    },
     auth: {
       user: process.env.MAIL_USER,
       pass: process.env.EMAIL_PASS,
+    },
+    tls: {
+      servername: 'smtp.gmail.com',
     },
   })
 
