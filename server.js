@@ -7,6 +7,10 @@ const nodemailer = require('nodemailer')
 
 const app = express()
 const PORT = process.env.PORT || 3000
+const STRIPE_PUBLISHABLE_KEY = process.env.STRIPE_PUBLISHABLE_KEY ||
+  'pk_test_51T0TSbENSTE40GlTsyq0zYQg0ifKhqJ6hY7WYGEoT8K91R6ossCD1vUeSPwpxgG40JzvP816apQW2Lnch9JzemYd00JEutRTru'
+
+app.set('trust proxy', 1)
 
 /* ========================
    БАЗА УСЛУГ
@@ -23,7 +27,7 @@ const SERVICES = {
 function basicAuth(req, res, next) {
   const authHeader = req.headers.authorization
 
-  if (!authHeader) {
+  if (!authHeader || !authHeader.startsWith('Basic ')) {
     res.setHeader('WWW-Authenticate', 'Basic realm="Admin Panel"')
     return res.status(401).send('Authorization required')
   }
@@ -151,6 +155,12 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
 app.use(express.static('public'))
 app.use(express.json())
 
+app.get('/config', (req, res) => {
+  res.json({
+    stripePublishableKey: STRIPE_PUBLISHABLE_KEY,
+  })
+})
+
 /* ========================
    CHECKOUT
 ======================== */
@@ -161,15 +171,27 @@ app.post('/create-checkout-session', async(req, res) => {
     return res.status(400).json({ error: 'Неверный email' })
   }
 
+  if (!Array.isArray(services) || services.length === 0) {
+    return res.status(400).json({ error: 'Выберите хотя бы одну услугу' })
+  }
+
+  const selectedServices = services.map(id => SERVICES[id])
+
+  if (selectedServices.some(service => !service)) {
+    return res.status(400).json({ error: 'Неверная услуга' })
+  }
+
   try {
-    const lineItems = services.map(id => ({
+    const lineItems = selectedServices.map(service => ({
       price_data: {
         currency: 'rub',
-        product_data: { name: SERVICES[id].name },
-        unit_amount: SERVICES[id].price * 100,
+        product_data: { name: service.name },
+        unit_amount: service.price * 100,
       },
       quantity: 1,
     }))
+
+    const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
@@ -177,10 +199,10 @@ app.post('/create-checkout-session', async(req, res) => {
       line_items: lineItems,
       customer_email: email,
       metadata: {
-        services: JSON.stringify(services.map(id => SERVICES[id])),
+        services: JSON.stringify(selectedServices),
       },
-      success_url: 'https://my-payment-site-1.onrender.com/success.html',
-      cancel_url: 'https://my-payment-site-1.onrender.com/cancel.html',
+      success_url: `${baseUrl}/success.html`,
+      cancel_url: `${baseUrl}/cancel.html`,
     })
 
     res.json({ id: session.id })
@@ -193,6 +215,10 @@ app.post('/create-checkout-session', async(req, res) => {
 /* ========================
    SERVER
 ======================== */
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`)
-})
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`)
+  })
+}
+
+module.exports = app
