@@ -4,6 +4,8 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY)
 const fs = require('fs')
 const path = require('path')
 const nodemailer = require('nodemailer')
+const dns = require('dns')
+const net = require('net')
 
 const app = express()
 const PORT = process.env.PORT || 3000
@@ -15,6 +17,68 @@ const SERVICES = {
   site: { name: 'Разработка сайта', price: 1500 },
   ads: { name: 'Настройка рекламы', price: 800 },
   logo: { name: 'Дизайн логотипа', price: 500 },
+}
+
+async function resolveDns(hostname, type) {
+  try {
+    const records = type === 'A'
+      ? await dns.promises.resolve4(hostname)
+      : await dns.promises.resolve6(hostname)
+
+    return { ok: true, records }
+  } catch (err) {
+    return {
+      ok: false,
+      code: err.code,
+      message: err.message,
+    }
+  }
+}
+
+function checkTcpConnection({ name, host, port, family }) {
+  return new Promise(resolve => {
+    const startedAt = Date.now()
+    const socket = net.createConnection({ host, port, family })
+
+    function finish(result) {
+      socket.destroy()
+      resolve({
+        name,
+        host,
+        port,
+        family,
+        durationMs: Date.now() - startedAt,
+        ...result,
+      })
+    }
+
+    socket.setTimeout(8000)
+
+    socket.once('connect', () => {
+      finish({
+        ok: true,
+        remoteAddress: socket.remoteAddress,
+        remoteFamily: socket.remoteFamily,
+      })
+    })
+
+    socket.once('timeout', () => {
+      finish({
+        ok: false,
+        code: 'ETIMEDOUT',
+        message: 'Connection timeout',
+      })
+    })
+
+    socket.once('error', err => {
+      finish({
+        ok: false,
+        code: err.code,
+        message: err.message,
+        address: err.address,
+      })
+    })
+  })
 }
 
 /* ========================
@@ -55,6 +119,39 @@ app.get('/admin', basicAuth, (req, res) => {
 
   const orders = JSON.parse(fs.readFileSync(ordersFile))
   res.json(orders)
+})
+
+app.get('/admin/smtp-check', basicAuth, async(req, res) => {
+  const checks = [
+    { name: 'Gmail SMTP 465 IPv4', host: 'smtp.gmail.com', port: 465, family: 4 },
+    { name: 'Gmail SMTP 587 IPv4', host: 'smtp.gmail.com', port: 587, family: 4 },
+    { name: 'Gmail SMTP 465 IPv6', host: 'smtp.gmail.com', port: 465, family: 6 },
+    { name: 'Gmail SMTP 587 IPv6', host: 'smtp.gmail.com', port: 587, family: 6 },
+    { name: 'Stripe API 443 IPv4', host: 'api.stripe.com', port: 443, family: 4 },
+  ]
+
+  const [gmailA, gmailAaaa, stripeA, tcp] = await Promise.all([
+    resolveDns('smtp.gmail.com', 'A'),
+    resolveDns('smtp.gmail.com', 'AAAA'),
+    resolveDns('api.stripe.com', 'A'),
+    Promise.all(checks.map(checkTcpConnection)),
+  ])
+
+  res.json({
+    checkedAt: new Date().toISOString(),
+    env: {
+      MAIL_USER: Boolean(process.env.MAIL_USER),
+      EMAIL_PASS: Boolean(process.env.EMAIL_PASS),
+      MAIL_USER_LENGTH: process.env.MAIL_USER?.length || 0,
+      EMAIL_PASS_LENGTH: process.env.EMAIL_PASS?.length || 0,
+    },
+    dns: {
+      smtpGmailComA: gmailA,
+      smtpGmailComAaaa: gmailAaaa,
+      apiStripeComA: stripeA,
+    },
+    tcp,
+  })
 })
 
 /* ========================
