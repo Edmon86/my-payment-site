@@ -3,9 +3,12 @@ const express = require('express')
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY)
 const fs = require('fs')
 const path = require('path')
-const nodemailer = require('nodemailer')
 const dns = require('dns')
 const net = require('net')
+
+// ✅ RESEND
+const { Resend } = require('resend')
+const resend = new Resend(process.env.RESEND_API_KEY)
 
 const app = express()
 const PORT = process.env.PORT || 3000
@@ -19,6 +22,9 @@ const SERVICES = {
   logo: { name: 'Дизайн логотипа', price: 500 },
 }
 
+/* ========================
+   DNS + TCP CHECK (оставляем)
+======================== */
 async function resolveDns(hostname, type) {
   try {
     const records = type === 'A'
@@ -27,11 +33,7 @@ async function resolveDns(hostname, type) {
 
     return { ok: true, records }
   } catch (err) {
-    return {
-      ok: false,
-      code: err.code,
-      message: err.message,
-    }
+    return { ok: false, code: err.code, message: err.message }
   }
 }
 
@@ -63,11 +65,7 @@ function checkTcpConnection({ name, host, port, family }) {
     })
 
     socket.once('timeout', () => {
-      finish({
-        ok: false,
-        code: 'ETIMEDOUT',
-        message: 'Connection timeout',
-      })
+      finish({ ok: false, code: 'ETIMEDOUT', message: 'Connection timeout' })
     })
 
     socket.once('error', err => {
@@ -82,7 +80,7 @@ function checkTcpConnection({ name, host, port, family }) {
 }
 
 /* ========================
-   BASIC AUTH (ADMIN)
+   BASIC AUTH
 ======================== */
 function basicAuth(req, res, next) {
   const authHeader = req.headers.authorization
@@ -113,9 +111,7 @@ function basicAuth(req, res, next) {
 app.get('/admin', basicAuth, (req, res) => {
   const ordersFile = path.join(__dirname, 'data', 'orders.json')
 
-  if (!fs.existsSync(ordersFile)) {
-    return res.json([])
-  }
+  if (!fs.existsSync(ordersFile)) return res.json([])
 
   const orders = JSON.parse(fs.readFileSync(ordersFile))
   res.json(orders)
@@ -124,42 +120,27 @@ app.get('/admin', basicAuth, (req, res) => {
 app.get('/admin/smtp-check', basicAuth, async(req, res) => {
   const checks = [
     { name: 'Gmail SMTP 465 IPv4', host: 'smtp.gmail.com', port: 465, family: 4 },
-    { name: 'Gmail SMTP 587 IPv4', host: 'smtp.gmail.com', port: 587, family: 4 },
-    { name: 'Gmail SMTP 465 IPv6', host: 'smtp.gmail.com', port: 465, family: 6 },
-    { name: 'Gmail SMTP 587 IPv6', host: 'smtp.gmail.com', port: 587, family: 6 },
     { name: 'Stripe API 443 IPv4', host: 'api.stripe.com', port: 443, family: 4 },
   ]
 
-  const [gmailA, gmailAaaa, stripeA, tcp] = await Promise.all([
+  const [gmailA, stripeA, tcp] = await Promise.all([
     resolveDns('smtp.gmail.com', 'A'),
-    resolveDns('smtp.gmail.com', 'AAAA'),
     resolveDns('api.stripe.com', 'A'),
     Promise.all(checks.map(checkTcpConnection)),
   ])
 
   res.json({
     checkedAt: new Date().toISOString(),
-    env: {
-      MAIL_USER: Boolean(process.env.MAIL_USER),
-      EMAIL_PASS: Boolean(process.env.EMAIL_PASS),
-      MAIL_USER_LENGTH: process.env.MAIL_USER?.length || 0,
-      EMAIL_PASS_LENGTH: process.env.EMAIL_PASS?.length || 0,
-    },
-    dns: {
-      smtpGmailComA: gmailA,
-      smtpGmailComAaaa: gmailAaaa,
-      apiStripeComA: stripeA,
-    },
+    dns: { smtpGmailComA: gmailA, apiStripeComA: stripeA },
     tcp,
   })
 })
 
 /* ========================
-   WEBHOOK (ВАЖНО ДО express.json)
+   WEBHOOK
 ======================== */
 app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
   const sig = req.headers['stripe-signature']
-
   let event
 
   try {
@@ -191,7 +172,6 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
 
     console.log('📦 Заказ:', order)
 
-    // 📁 Сохранение
     const dataDir = path.join(__dirname, 'data')
     if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir)
 
@@ -207,20 +187,12 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
 
     console.log('✅ Заказ сохранён')
 
-    // 📧 EMAIL
+    /* ========= EMAIL через Resend ========= */
     if (order.email) {
-      console.log('🚀 Отправка email через Gmail...')
+      console.log('🚀 Отправка email через Resend...')
 
-      const transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: {
-          user: process.env.MAIL_USER,
-          pass: process.env.EMAIL_PASS,
-        },
-      })
-
-      const message = {
-        from: process.env.MAIL_USER,
+      resend.emails.send({
+        from: process.env.EMAIL_FROM,
         to: order.email,
         subject: 'Ваш заказ успешно оплачен ✅',
         html: `
@@ -231,11 +203,9 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
           </ul>
           <p><b>Итого: ${order.amount} ₽</b></p>
         `,
-      }
-
-      transporter.sendMail(message)
-        .then(() => console.log('✅ Email отправлен'))
-        .catch(err => console.error('❌ Ошибка Gmail:', err))
+      })
+        .then(() => console.log('✅ Email отправлен через Resend'))
+        .catch(err => console.error('❌ Ошибка Resend:', err))
     }
   }
 
@@ -243,7 +213,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
 })
 
 /* ========================
-   ПОСЛЕ webhook!
+   STATIC + JSON
 ======================== */
 app.use(express.static('public'))
 app.use(express.json())
