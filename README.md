@@ -1,5 +1,6 @@
 # My Payment Site
 
+[![Live Demo](https://img.shields.io/badge/Live_Demo-Render-46E3B7?style=for-the-badge&logo=render&logoColor=000)](https://my-payment-site-1.onrender.com)
 ![Node.js](https://img.shields.io/badge/Node.js-20.x-339933?style=for-the-badge&logo=node.js&logoColor=white)
 ![Express](https://img.shields.io/badge/Express-5.x-000000?style=for-the-badge&logo=express&logoColor=white)
 ![Stripe](https://img.shields.io/badge/Stripe-Checkout-635BFF?style=for-the-badge&logo=stripe&logoColor=white)
@@ -13,6 +14,14 @@
 ![License](https://img.shields.io/badge/License-ISC-blue?style=for-the-badge)
 
 Простой сайт для онлайн-оплаты цифровых услуг через Stripe. Пользователь выбирает услуги, указывает email и переходит на защищенную страницу оплаты. После успешной оплаты заказ сохраняется, а клиент получает email-подтверждение.
+
+## Деплой
+
+Проект доступен на Render:
+
+```text
+https://my-payment-site-1.onrender.com
+```
 
 ## Возможности
 
